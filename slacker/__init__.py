@@ -18,10 +18,9 @@ import requests
 
 from slacker.utils import get_item_id_by_name
 
-
 API_BASE_URL = 'https://slack.com/api/{api}'
+SCIM_API_URL = 'https://api.slack.com/scim/v1/{endpoint}'
 DEFAULT_TIMEOUT = 10
-
 
 __all__ = ['Error', 'Response', 'BaseAPI', 'API', 'Auth', 'Users', 'Groups',
            'Channels', 'Chat', 'IM', 'IncomingWebhook', 'Search', 'Files',
@@ -95,7 +94,7 @@ class UsersProfile(BaseAPI):
         )
 
     def set(self, user=None, profile=None, name=None, value=None):
-        return self.post('users.profile.get',
+        return self.post('users.profile.set',
                          data={
                              'user': user,
                              'profile': profile,
@@ -131,6 +130,30 @@ class Users(BaseAPI):
     def get_user_id(self, user_name):
         members = self.list().body['members']
         return get_item_id_by_name(members, user_name)
+
+    def create(self, username, emails, nickname='', first_name='', family_name='', title=''):
+        endpoint = 'Users'
+        if not isinstance(emails, list):
+            emails = [emails]
+        data = {
+            'schemas': ["urn:scim:schemas:core:1.0"],
+            "userName": username,
+            "nickName": nickname or username,
+            "name": {
+                "givenName": first_name,
+                "familyName": family_name,
+            },
+            "title": title,
+            "emails": [{
+                "value": email,
+                "primary": not bool(idx)
+            } for (idx, email) in enumerate(emails)],
+        }
+        return requests.post(
+            SCIM_API_URL.format({'endpoint': endpoint}),
+            headers={'token': self.token},
+            data=json.dumps(data)
+        )
 
 
 class Groups(BaseAPI):
@@ -324,14 +347,15 @@ class IM(BaseAPI):
         return self.get('im.list')
 
     def history(self, channel, latest=None, oldest=None, count=None,
-                inclusive=None):
+                inclusive=None, unreads=False):
         return self.get('im.history',
                         params={
                             'channel': channel,
                             'latest': latest,
                             'oldest': oldest,
                             'count': count,
-                            'inclusive': inclusive
+                            'inclusive': inclusive,
+                            'unreads': int(unreads)
                         })
 
     def mark(self, channel, ts):
@@ -750,6 +774,16 @@ class UserGroups(BaseAPI):
             'usergroup': usergroup,
             'include_count': include_count,
         })
+
+    def delete(self, usergroup):
+        endpoint = "Groups/{usergroup}"
+        
+        return requests.delete(
+            SCIM_API_URL.format(
+                {'endpoint': endpoint.format({'usergroup': usergroup})}
+            ),
+            headers={'token': self.token}
+        )
 
 
 class DND(BaseAPI):
