@@ -149,10 +149,14 @@ class Users(BaseAPI):
                 "primary": not bool(idx)
             } for (idx, email) in enumerate(emails)],
         }
+        headers = {
+                'Authorization': 'Bearer %s' % self.token,
+                'Content-type': 'application/json'
+            }
         return requests.post(
             SCIM_API_URL.format({'endpoint': endpoint}),
-            headers={'token': self.token},
-            data=json.dumps(data)
+            headers=headers,
+            json=data
         )
 
 
@@ -778,11 +782,16 @@ class UserGroups(BaseAPI):
     def delete(self, usergroup):
         endpoint = "Groups/{usergroup}"
         
+        headers = {
+                'Authorization': 'Bearer %s' % self.token,
+                'Content-type': 'application/json'
+            }
+
         return requests.delete(
             SCIM_API_URL.format(
                 {'endpoint': endpoint.format({'usergroup': usergroup})}
             ),
-            headers={'token': self.token}
+            headers=headers
         )
 
 
