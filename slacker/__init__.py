@@ -131,6 +131,10 @@ class Users(BaseAPI):
     def get_user_id(self, user_name):
         members = self.list().body['members']
         return get_item_id_by_name(members, user_name)
+        
+    def create(self, username, email):
+        # placeholder
+        return requests.post('')
 
 
 class Groups(BaseAPI):
