@@ -27,7 +27,7 @@ __all__ = ['Error', 'Response', 'BaseAPI', 'API', 'Auth', 'Users', 'Groups',
            'Stars', 'Emoji', 'Presence', 'RTM', 'Team', 'Reactions', 'Pins',
            'UserGroups', 'UserGroupsUsers', 'MPIM', 'OAuth', 'DND', 'Bots',
            'FilesComments', 'Reminders', 'TeamProfile', 'UsersProfile',
-           'Slacker']
+           'IDPGroups', 'Slacker']
 
 
 class Error(Exception):
@@ -40,6 +40,8 @@ class Response(object):
         self.body = json.loads(body)
         self.successful = self.body['ok']
         self.error = self.body.get('error')
+    def __str__(self):
+        return json.dumps(self.body)
 
 
 class BaseAPI(object):
@@ -103,20 +105,39 @@ class UsersProfile(BaseAPI):
                          })
 
 
+class UsersAdmin(BaseAPI):
+    def invite(self, email, channels=None, first_name=None,
+               last_name=None, resend=True):
+        return self.post('users.admin.invite', params={
+            'email': email,
+            'channels': channels,
+            'first_name': first_name,
+            'last_name': last_name,
+            'resend': resend})
+
+
 class Users(BaseAPI):
     def __init__(self, *args, **kwargs):
         super(Users, self).__init__(*args, **kwargs)
         self._profile = UsersProfile(*args, **kwargs)
+        self._admin = UsersAdmin(*args, **kwargs)
 
     @property
     def profile(self):
         return self._profile
+
+    @property
+    def admin(self):
+        return self._admin
 
     def info(self, user):
         return self.get('users.info', params={'user': user})
 
     def list(self, presence=False):
         return self.get('users.list', params={'presence': int(presence)})
+
+    def identity(self):
+        return self.get('users.identity')
 
     def set_active(self):
         return self.post('users.setActive')
@@ -231,9 +252,10 @@ class Channels(BaseAPI):
     def info(self, channel):
         return self.get('channels.info', params={'channel': channel})
 
-    def list(self, exclude_archived=None):
+    def list(self, exclude_archived=None, exclude_members=None):
         return self.get('channels.list',
-                        params={'exclude_archived': exclude_archived})
+                        params={'exclude_archived': exclude_archived,
+                                'exclude_members': exclude_members})
 
     def history(self, channel, latest=None, oldest=None, count=None,
                 inclusive=False, unreads=False):
@@ -289,10 +311,10 @@ class Channels(BaseAPI):
 
 
 class Chat(BaseAPI):
-    def post_message(self, channel, text, username=None, as_user=None,
+    def post_message(self, channel, text=None, username=None, as_user=None,
                      parse=None, link_names=None, attachments=None,
                      unfurl_links=None, unfurl_media=None, icon_url=None,
-                     icon_emoji=None):
+                     icon_emoji=None, thread_ts=None):
 
         # Ensure attachments are json encoded
         if attachments:
@@ -311,7 +333,8 @@ class Chat(BaseAPI):
                              'unfurl_links': unfurl_links,
                              'unfurl_media': unfurl_media,
                              'icon_url': icon_url,
-                             'icon_emoji': icon_emoji
+                             'icon_emoji': icon_emoji,
+                             'thread_ts': thread_ts
                          })
 
     def me_message(self, channel, text):
@@ -329,7 +352,7 @@ class Chat(BaseAPI):
     def update(self, channel, ts, text, attachments=None, parse=None,
                link_names=False, as_user=None):
         # Ensure attachments are json encoded
-        if attachments and isinstance(attachments, list):
+        if attachments is not None and isinstance(attachments, list):
             attachments = json.dumps(attachments)
         return self.post('chat.update',
                          data={
@@ -342,8 +365,13 @@ class Chat(BaseAPI):
                              'as_user': as_user,
                          })
 
-    def delete(self, channel, ts):
-        return self.post('chat.delete', data={'channel': channel, 'ts': ts})
+    def delete(self, channel, ts, as_user=False):
+        return self.post('chat.delete',
+                         data={
+                             'channel': channel,
+                             'ts': ts,
+                             'as_user': as_user
+                         })
 
 
 class IM(BaseAPI):
@@ -362,6 +390,10 @@ class IM(BaseAPI):
                             'unreads': int(unreads)
                         })
 
+    def replies(self, channel, thread_ts):
+        return self.get('im.replies',
+                        params={'channel': channel, 'thread_ts': thread_ts})
+
     def mark(self, channel, ts):
         return self.post('im.mark', data={'channel': channel, 'ts': ts})
 
@@ -377,7 +409,7 @@ class MPIM(BaseAPI):
         if isinstance(users, (tuple, list)):
             users = ','.join(users)
 
-        return self.post('mpim.open', data={'user': users})
+        return self.post('mpim.open', data={'users': users})
 
     def close(self, channel):
         return self.post('mpim.close', data={'channel': channel})
@@ -399,6 +431,10 @@ class MPIM(BaseAPI):
                             'count': count,
                             'unreads': int(unreads)
                         })
+
+    def replies(self, channel, thread_ts):
+        return self.get('mpim.replies',
+                        params={'channel': channel, 'thread_ts': thread_ts})
 
 
 class Search(BaseAPI):
@@ -450,7 +486,7 @@ class FilesComments(BaseAPI):
 
     def edit(self, file_, id, comment):
         return self.post('files.comments.edit',
-                         data={'file': file, 'id': id, 'comment': comment})
+                         data={'file': file_, 'id': id, 'comment': comment})
 
 
 class Files(BaseAPI):
@@ -463,7 +499,7 @@ class Files(BaseAPI):
         return self._comments
 
     def list(self, user=None, ts_from=None, ts_to=None, types=None,
-             count=None, page=None):
+             count=None, page=None, channel=None):
         return self.get('files.list',
                         params={
                             'user': user,
@@ -471,29 +507,33 @@ class Files(BaseAPI):
                             'ts_to': ts_to,
                             'types': types,
                             'count': count,
-                            'page': page
+                            'page': page,
+                            'channel': channel
                         })
 
     def info(self, file_, count=None, page=None):
         return self.get('files.info',
                         params={'file': file_, 'count': count, 'page': page})
 
-    def upload(self, file_, content=None, filetype=None, filename=None,
+    def upload(self, file_=None, content=None, filetype=None, filename=None,
                title=None, initial_comment=None, channels=None):
-        with open(file_, 'rb') as f:
-            if isinstance(channels, (tuple, list)):
-                channels = ','.join(channels)
+        if isinstance(channels, (tuple, list)):
+            channels = ','.join(channels)
 
-            return self.post('files.upload',
-                             data={
-                                 'content': content,
-                                 'filetype': filetype,
-                                 'filename': filename,
-                                 'title': title,
-                                 'initial_comment': initial_comment,
-                                 'channels': channels
-                             },
-                             files={'file': f})
+        data = {
+            'content': content,
+            'filetype': filetype,
+            'filename': filename,
+            'title': title,
+            'initial_comment': initial_comment,
+            'channels': channels
+        }
+
+        if file_:
+            with open(file_, 'rb') as f:
+                return self.post('files.upload', data=data, files={'file': f})
+        else:
+            return self.post('files.upload', data=data)
 
     def delete(self, file_):
         return self.post('files.delete', data={'file': file_})
@@ -557,11 +597,14 @@ class RTM(BaseAPI):
                             'mpim_aware': int(mpim_aware),
                         })
 
+    def connect(self):
+        return self.get('rtm.connect')
+
 
 class TeamProfile(BaseAPI):
     def get(self, visibility=None):
         return super(TeamProfile, self).get(
-            'users.profile.get',
+            'team.profile.get',
             params={'visibility': visibility}
         )
 
@@ -841,6 +884,12 @@ class Bots(BaseAPI):
         return self.get('bots.info', params={'bot': bot})
 
 
+class IDPGroups(BaseAPI):
+    def list(self, include_users=False):
+        return self.get('idpgroups.list',
+                        params={'include_users': int(include_users)})
+
+
 class OAuth(BaseAPI):
     def access(self, client_id, client_secret, code, redirect_uri=None):
         return self.post('oauth.access',
@@ -894,6 +943,7 @@ class Slacker(object):
         self.presence = Presence(token=token, timeout=timeout)
         self.reminders = Reminders(token=token, timeout=timeout)
         self.reactions = Reactions(token=token, timeout=timeout)
+        self.idpgroups = IDPGroups(token=token, timeout=timeout)
         self.usergroups = UserGroups(token=token, timeout=timeout)
         self.incomingwebhook = IncomingWebhook(url=incoming_webhook_url,
                                                timeout=timeout)
